@@ -1,0 +1,7 @@
+bin/
+*.exe
+*.test
+coverage.*
+vendor/
+.DS_Store
+tester/
