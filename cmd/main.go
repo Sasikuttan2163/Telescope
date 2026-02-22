@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 
 	"github.com/Sasikuttan2163/Telescope/internal/config"
 	"github.com/Sasikuttan2163/Telescope/internal/transport"
@@ -10,7 +10,7 @@ import (
 func main() {
 	config, err := config.GetConfig("test.json")
 	if err != nil {
-		fmt.Sprint("Fatal error " + err.Error())
+		log.Fatal("Fatal error " + err.Error())
 	}
 	transport.FetchTools(config)
 }
