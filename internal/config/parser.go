@@ -8,8 +8,17 @@ import (
 )
 
 type MainConfig struct {
+	Qdrant     QdrantConfig `json:"qdrant" validate:"required"`
+	Ollama     OllamaConfig `json:"ollama" validate:"required"`
 	Stars      []StarConfig `json:"stars" validate:"required"`
 	DebugLevel string       `json:"debug_level" validate:"required"`
+}
+
+type OllamaConfig struct {
+	Host     string `json:"host" validate:"required"`
+	Port     int    `json:"port" validate:"required"`
+	Model    string `json:"model" validate:"required"`
+	EmbedDim uint64 `json:"embed_dim" validate:"required"`
 }
 
 type StarConfig struct {
@@ -60,16 +69,18 @@ type HealthConfig struct {
 	Interval time.Duration `json:"interval_seconds" validate:"min=5"`
 }
 
-func GetConfig(configFile string) MainConfig {
+type QdrantConfig struct {
+	Host string `json:"host" validate:"required,url"`
+	Port int    `json:"port" validate:"required,url"`
+}
+
+func GetConfig(configFile string) (MainConfig, error) {
 	content, _ := os.ReadFile(configFile)
 	var starConfig MainConfig
 	err := json.Unmarshal(content, &starConfig)
-	if err != nil {
-
-	}
 
 	fmt.Println(starConfig)
-	return starConfig
+	return starConfig, err
 }
 
 func main() {
