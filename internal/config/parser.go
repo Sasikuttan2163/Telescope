@@ -19,6 +19,7 @@ type OllamaConfig struct {
 	Port     int    `json:"port" validate:"required"`
 	Model    string `json:"model" validate:"required"`
 	EmbedDim uint64 `json:"embed_dim" validate:"required"`
+	NumGpu   int    `json:""num_gpu,omitempty"`
 }
 
 type StarConfig struct {
@@ -70,8 +71,9 @@ type HealthConfig struct {
 }
 
 type QdrantConfig struct {
-	Host string `json:"host" validate:"required,url"`
-	Port int    `json:"port" validate:"required,url"`
+	Host           string `json:"host" validate:"required,url"`
+	Port           int    `json:"port" validate:"required,url"`
+	CollectionName string `json:"collection_name" validate:"required"`
 }
 
 func GetConfig(configFile string) (MainConfig, error) {

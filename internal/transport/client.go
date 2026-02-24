@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/Sasikuttan2163/Telescope/internal/config"
+	"github.com/Sasikuttan2163/Telescope/internal/types"
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -22,7 +24,7 @@ func (ht *httpTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return ht.mainTripper.RoundTrip(req)
 }
 
-func FetchToolsOfStar(star config.StarConfig) {
+func FetchToolsOfStar(ctx context.Context, star config.StarConfig) ([]*types.Tool, error) {
 	httpClient := &http.Client{
 		Transport: &httpTripper{
 			headers:     star.Transport.HTTP.Headers,
@@ -30,34 +32,43 @@ func FetchToolsOfStar(star config.StarConfig) {
 		},
 	}
 
-	ctx := context.Background()
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "telescope-client",
 		Version: "v0.0.1",
 	}, nil)
+
 	transport := &mcp.StreamableClientTransport{
 		Endpoint:   star.Transport.HTTP.BaseURL,
 		HTTPClient: httpClient,
 	}
 
 	session, err := client.Connect(ctx, transport, nil)
-
 	if err != nil {
-		log.Fatalf("Failed to connect to %s\nError: %v", star.ID, err)
+		log.Printf("Failed to connect to %s: %v", star.ID, err)
+		return nil, fmt.Errorf("Failed to connect to MCP %s: %s", star.ID, star.Name)
 	}
-
 	defer session.Close()
-	res, err := session.ListTools(ctx, nil)
 
-	if err != nil {
-		log.Fatalf("Calltool failed: %v", err)
-	}
-	fmt.Println("Found ", len(res.Tools), " tools in ", star.Name)
-}
+	if session.InitializeResult().Capabilities.Tools != nil {
+		res, err := session.ListTools(ctx, nil)
+		if err != nil {
+			log.Printf("Failed to list tools for %s: %v", star.ID, err)
+			return nil, err
+		}
+		fmt.Println("Found", len(res.Tools), "tools in", star.Name)
 
-func FetchTools(mc config.MainConfig) {
-	stars := mc.Stars
-	for _, star := range stars {
-		FetchToolsOfStar(star)
+		tools := make([]*types.Tool, len(res.Tools))
+		for i, mcpTool := range res.Tools {
+			ident := fmt.Sprintf("%s::%s", star.Name, mcpTool.Name)
+			tools[i] = &types.Tool{
+				Name:        mcpTool.Name,
+				Description: mcpTool.Description,
+				Identifier:  ident,
+				Uuid:        uuid.NewSHA1(uuid.NameSpaceURL, []byte(ident)).String(),
+			}
+		}
+		return tools, err
 	}
+
+	return nil, fmt.Errorf("MCP %s: %s does not support tools", star.ID, star.Name)
 }

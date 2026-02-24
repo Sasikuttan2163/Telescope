@@ -4,6 +4,7 @@ package qdrantdb
 import (
 	"context"
 
+	"github.com/Sasikuttan2163/Telescope/internal/types"
 	"github.com/qdrant/go-client/qdrant"
 )
 
@@ -49,6 +50,31 @@ func (q *Qdrant) Insert(ctx context.Context, collectionName string, id string, v
 					Payload: qdrant.NewValueMap(payload),
 				},
 			},
+		},
+	)
+	return err
+}
+
+func (q *Qdrant) BatchInsert(ctx context.Context, collectionName string, tools []*types.Tool) error {
+	points := make([]*qdrant.PointStruct, len(tools))
+
+	for i, v := range tools {
+		mp := make(map[string]any)
+		mp["Name"] = v.Name
+		mp["Description"] = v.Description
+		mp["Identifier"] = v.Identifier
+		points[i] = &qdrant.PointStruct{
+			Id:      qdrant.NewID(v.Uuid),
+			Vectors: qdrant.NewVectors(v.Vector...),
+			Payload: qdrant.NewValueMap(mp),
+		}
+	}
+
+	_, err := q.Client.Upsert(
+		ctx,
+		&qdrant.UpsertPoints{
+			CollectionName: collectionName,
+			Points:         points,
 		},
 	)
 	return err

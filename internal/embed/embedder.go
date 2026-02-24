@@ -6,15 +6,17 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/Sasikuttan2163/Telescope/internal/types"
 	"github.com/ollama/ollama/api"
 )
 
-func getEmbedString(mcpServerName string, toolName string, toolDescription string) string {
-	return fmt.Sprintf("Tool: %s\nProvider: %s\nDescription: %s", toolName, mcpServerName, toolDescription)
-}
-
-func ollamaGetToolVector(host string, port int, model string, mcpServerName string, toolName string, toolDescription string) ([][]float32, error) {
-	embed_text := getEmbedString(mcpServerName, toolName, toolDescription)
+func OllamaGetToolVector(ctx context.Context, host string, port int, numGpu *int, model string, mcpServerName string, tools *[]*types.Tool) ([][]float32, error) {
+	embedTexts := make([]string, len(*tools))
+	for i, tool := range *tools {
+		embedStr := fmt.Sprintf("Provider: %s\nTool: %s\nDescription: %s", mcpServerName, tool.Name, tool.Description)
+		tool.EmbedString = embedStr
+		embedTexts[i] = embedStr
+	}
 
 	baseURL := &url.URL{
 		Scheme: "http",
@@ -25,18 +27,25 @@ func ollamaGetToolVector(host string, port int, model string, mcpServerName stri
 
 	req := &api.EmbedRequest{
 		Model: model,
-		Input: embed_text,
+		Input: embedTexts,
 	}
 
-	resp, err := client.Embed(context.Background(), req)
+	if numGpu != nil {
+		req.Options = map[string]interface{}{
+			"num_gpu": numGpu,
+		}
+	}
 
+	resp, err := client.Embed(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	return resp.Embeddings, err
-}
+	for i, tool := range *tools {
+		if i < len(resp.Embeddings) {
+			tool.Vector = resp.Embeddings[i]
+		}
+	}
 
-func OllamaGetMCPVectors(host string, port int, model string, mcpServerName string, tools map[string]string) {
-
+	return resp.Embeddings, nil
 }
