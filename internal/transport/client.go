@@ -61,10 +61,12 @@ func FetchToolsOfStar(ctx context.Context, star config.StarConfig) ([]*types.Too
 		for i, mcpTool := range res.Tools {
 			ident := fmt.Sprintf("%s::%s", star.Name, mcpTool.Name)
 			tools[i] = &types.Tool{
-				Name:        mcpTool.Name,
-				Description: mcpTool.Description,
-				Identifier:  ident,
-				Uuid:        uuid.NewSHA1(uuid.NameSpaceURL, []byte(ident)).String(),
+				Name:         mcpTool.Name,
+				Description:  mcpTool.Description,
+				Identifier:   ident,
+				Uuid:         uuid.NewSHA1(uuid.NameSpaceURL, []byte(ident)).String(),
+				InputSchema:  mcpTool.InputSchema,
+				OutputSchema: mcpTool.OutputSchema,
 			}
 		}
 		return tools, err

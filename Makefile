@@ -11,7 +11,7 @@ help:
 
 build:
 	mkdir -p bin
-	go build -o bin/mcp-proxy ./cmd/proxy
+	go build -o bin/telescope-mcp ./cmd/
 
 run:
 	go run ./cmd/proxy

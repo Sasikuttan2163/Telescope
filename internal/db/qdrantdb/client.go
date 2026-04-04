@@ -1,4 +1,3 @@
-// Package qdrantdb provides a Qdrant vector database client.
 package qdrantdb
 
 import (
@@ -88,4 +87,31 @@ func (q *Qdrant) Query(ctx context.Context, collectionName string, query []float
 			Query:          qdrant.NewQuery(query...),
 		},
 	)
+}
+
+func (q *Qdrant) GetAllPoints(ctx context.Context, collectionName string) ([]*qdrant.RetrievedPoint, error) {
+	var allPoints []*qdrant.RetrievedPoint
+	var nextOffset *qdrant.PointId
+
+	for {
+		resp, newOffset, err := q.Client.ScrollAndOffset(ctx, &qdrant.ScrollPoints{
+			CollectionName: collectionName,
+			WithPayload:    qdrant.NewWithPayload(true),
+			WithVectors:    qdrant.NewWithVectors(false),
+			Offset:         nextOffset,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		allPoints = append(allPoints, resp...)
+
+		if len(resp) == 0 || newOffset == nil {
+			break
+		}
+
+		nextOffset = newOffset
+	}
+
+	return allPoints, nil
 }

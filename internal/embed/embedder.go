@@ -49,3 +49,30 @@ func OllamaGetToolVector(ctx context.Context, host string, port int, numGpu *int
 
 	return resp.Embeddings, nil
 }
+
+func OllamaGetQueryVector(ctx context.Context, host string, port int, numGpu *int, model string, query string) ([]float32, error) {
+	baseURL := &url.URL{
+		Scheme: "http",
+		Host:   fmt.Sprintf("%s:%d", host, port),
+	}
+
+	client := api.NewClient(baseURL, http.DefaultClient)
+
+	req := &api.EmbedRequest{
+		Model: model,
+		Input: query,
+	}
+
+	if numGpu != nil {
+		req.Options = map[string]interface{}{
+			"num_gpu": numGpu,
+		}
+	}
+
+	resp, err := client.Embed(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.Embeddings[0], nil
+}

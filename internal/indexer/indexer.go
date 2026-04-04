@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -10,10 +11,11 @@ import (
 	"github.com/Sasikuttan2163/Telescope/internal/db/qdrantdb"
 	"github.com/Sasikuttan2163/Telescope/internal/embed"
 	"github.com/Sasikuttan2163/Telescope/internal/transport"
+	"github.com/Sasikuttan2163/Telescope/internal/types"
+	"github.com/qdrant/go-client/qdrant"
 )
 
 func IndexStar(ctx context.Context, ollamaConfig config.OllamaConfig, starConfig config.StarConfig, qdrant *qdrantdb.Qdrant, collectionName string) error {
-
 	fetchCtx, cancel := context.WithTimeout(ctx, time.Duration(starConfig.Timeout)*time.Second)
 	defer cancel()
 
@@ -75,4 +77,67 @@ func IndexAllStars(ctx context.Context, mainConfig config.MainConfig) (successCo
 
 	indexWg.Wait()
 	return
+}
+
+func GetAllIndexedStars(ctx context.Context, mainConfig config.MainConfig) ([]types.Tool, error) {
+	qdrantClient, err := qdrantdb.NewQdrant(mainConfig.Qdrant.Host, mainConfig.Qdrant.Port)
+	if err != nil {
+		return nil, err
+	}
+
+	points, err := qdrantClient.GetAllPoints(ctx, mainConfig.Qdrant.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	tools := make([]types.Tool, 0, len(points))
+
+	for _, v := range points {
+		payloadMap := qdrantPayloadToMap(v.Payload)
+
+		payloadBytes, err := json.Marshal(payloadMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal payload: %w", err)
+		}
+
+		var tool types.Tool
+		if err := json.Unmarshal(payloadBytes, &tool); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal into tool: %w", err)
+		}
+
+		tools = append(tools, tool)
+	}
+
+	return tools, nil
+}
+
+func qdrantPayloadToMap(payload map[string]*qdrant.Value) map[string]any {
+	result := make(map[string]any)
+	for k, v := range payload {
+		result[k] = qdrantValueToAny(v)
+	}
+	return result
+}
+
+func qdrantValueToAny(v *qdrant.Value) any {
+	switch kind := v.GetKind().(type) {
+	case *qdrant.Value_StringValue:
+		return kind.StringValue
+	case *qdrant.Value_IntegerValue:
+		return kind.IntegerValue
+	case *qdrant.Value_DoubleValue:
+		return kind.DoubleValue
+	case *qdrant.Value_BoolValue:
+		return kind.BoolValue
+	case *qdrant.Value_ListValue:
+		list := make([]any, 0, len(kind.ListValue.Values))
+		for _, item := range kind.ListValue.Values {
+			list = append(list, qdrantValueToAny(item))
+		}
+		return list
+	case *qdrant.Value_StructValue:
+		return qdrantPayloadToMap(kind.StructValue.Fields)
+	default:
+		return nil
+	}
 }

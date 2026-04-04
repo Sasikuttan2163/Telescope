@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"time"
 )
@@ -81,7 +80,6 @@ func GetConfig(configFile string) (MainConfig, error) {
 	var starConfig MainConfig
 	err := json.Unmarshal(content, &starConfig)
 
-	fmt.Println(starConfig)
 	return starConfig, err
 }
 
