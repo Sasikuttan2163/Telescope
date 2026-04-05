@@ -2,32 +2,38 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/Sasikuttan2163/Telescope/internal/config"
+	"github.com/Sasikuttan2163/Telescope/internal/embed"
 	"github.com/Sasikuttan2163/Telescope/internal/indexer"
+	"github.com/Sasikuttan2163/Telescope/internal/transport"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-var configPath *string
+var mainConfig config.MainConfig
 
 type ListAllToolsParams struct {
+}
+
+type SearchToolsParams struct {
+	Query string `json:"query" jsonschema:"Action-oriented phrase describing what you want to DO e.g. 'web search' or 'send email' or 'create github issue'. Before giving up or telling the user you cannot do something ALWAYS call searchTools first to find the right tool. Do NOT pass the user question directly as the query. Bad: 'what is the most used MCP server' Good: 'web search'. Not for searching the web or files directly — use it to FIND the tool that can do that."`
+}
+
+type CallToolParams struct {
+	ToolName string         `json:"toolName" jsonschema:"The tool which is being called"`
+	Input    map[string]any `json:"inputJson" jsonschema:"Input to be given to the tool based on inputSchema as a JSON"`
 }
 
 func ListAllTools(ctx context.Context, req *mcp.CallToolRequest, args ListAllToolsParams) (*mcp.CallToolResult, any, error) {
 	var res []byte
 
-	cfg, err := config.GetConfig(*configPath)
-	if err != nil {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: "Error loading config: " + err.Error()}},
-			IsError: true,
-		}, nil, nil
-	}
-
-	allTools, err := indexer.GetAllIndexedStars(ctx, cfg)
+	allTools, err := indexer.GetAllIndexedStars(ctx, mainConfig)
 	if err != nil {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error fetching tools: " + err.Error()}},
@@ -36,7 +42,7 @@ func ListAllTools(ctx context.Context, req *mcp.CallToolRequest, args ListAllToo
 	}
 
 	for i, v := range allTools {
-		res = fmt.Append(res, fmt.Sprintf("Tool %d: %s\n", i, v.Name))
+		res = fmt.Append(res, fmt.Sprintf("Tool %d: %s__%s\n", i, v.ServerName, v.Name))
 	}
 
 	return &mcp.CallToolResult{
@@ -48,28 +54,117 @@ func ListAllTools(ctx context.Context, req *mcp.CallToolRequest, args ListAllToo
 	}, nil, nil
 }
 
+func SearchTools(ctx context.Context, req *mcp.CallToolRequest, args SearchToolsParams) (*mcp.CallToolResult, any, error) {
+	var res []byte
+
+	queryVectorCtx, cancel := context.WithTimeout(ctx, time.Duration(10)*time.Second)
+	defer cancel()
+
+	queryVector, err := embed.OllamaGetQueryVector(queryVectorCtx, mainConfig.Ollama.Host, mainConfig.Ollama.Port, &mainConfig.Ollama.NumGpu, mainConfig.Ollama.Model, args.Query)
+	if err != nil {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error occurred while getting vectors from ollama. Full trace: %s", err.Error()),
+				},
+			},
+		}, nil, err
+	}
+
+	topKToolsCtx, cancel := context.WithTimeout(ctx, time.Duration(10)*time.Second)
+	defer cancel()
+	topKTools, err := indexer.GetTopKTools(topKToolsCtx, mainConfig, queryVector)
+	if err != nil {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Error occurred while fetching top-K tools. Full error trace: %s", err.Error()),
+				},
+			},
+		}, nil, err
+	}
+
+	for i, v := range topKTools {
+		schemaBytes, _ := json.Marshal(v.InputSchema)
+		res = fmt.Append(res, fmt.Sprintf(
+			"Rank %d:\n  Tool ID: %s\n  Server: %s\n  Tool Name: %s\n  Description: %s\n  Input Schema: %s\n\n",
+			i, v.Uuid, v.ServerName, v.Name, v.Description, string(schemaBytes),
+		))
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: string(res),
+			},
+		},
+	}, nil, nil
+}
+
+func CallTool(ctx context.Context, req *mcp.CallToolRequest, args CallToolParams) (*mcp.CallToolResult, any, error) {
+	parts := strings.Split(args.ToolName, "__")
+	if len(parts) != 2 {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{&mcp.TextContent{Text: "Invalid tool name format. Expected: serverName__toolName"}},
+		}, nil, nil
+	}
+
+	serverName := parts[0]
+	toolName := parts[1]
+
+	star := transport.GetStarByName(mainConfig.Stars, serverName)
+	if star == nil {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Server %s not found in configuration", serverName)}},
+		}, nil, nil
+	}
+
+	inputBytes, err := json.Marshal(args.Input)
+	if err != nil {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{&mcp.TextContent{Text: "Failed to marshal tool input: " + err.Error()}},
+		}, nil, err
+	}
+
+	result, err := transport.CallToolOnStar(ctx, *star, toolName, inputBytes)
+	if err != nil {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error calling tool: " + err.Error()}},
+		}, nil, err
+	}
+
+	return result, nil, nil
+}
+
 func main() {
-	configPath = flag.String("path", "test.json", "Specify path to the JSON configuration file")
+	configPath := flag.String("path", "test.json", "Specify path to the JSON configuration file")
 	flag.Parse()
-	config, err := config.GetConfig(*configPath)
+	var err error
+	mainConfig, err = config.GetConfig(*configPath)
 	if err != nil {
 		log.Fatal("Fatal error " + err.Error())
 	}
 
-	succ, errs := indexer.IndexAllStars(context.Background(), config)
-	fmt.Printf("Successfully indexed: %d out of %d\n", succ, len(config.Stars))
+	succ, errs := indexer.IndexAllStars(context.Background(), mainConfig)
+	fmt.Printf("Successfully indexed: %d out of %d\n", succ, len(mainConfig.Stars))
 
 	for _, err := range errs {
 		fmt.Printf("%s", err.Error())
 	}
 
-	allTools, err := indexer.GetAllIndexedStars(context.Background(), config)
+	allTools, err := indexer.GetAllIndexedStars(context.Background(), mainConfig)
 	if err != nil {
 		log.Fatal("Failed to retrieve indexed tools: " + err.Error())
 	}
 
 	for i, v := range allTools {
-		fmt.Printf("Tool %d: %s\n", i, v.Name)
+		fmt.Printf("Tool %d: %s__%s\n", i, v.ServerName, v.Name)
 	}
 
 	server := mcp.NewServer(
@@ -80,10 +175,51 @@ func main() {
 		nil,
 	)
 
+	// mcp.AddTool(server, &mcp.Tool{
+	// 	Name:        "listTools",
+	// 	Description: "Use this tool to view the full list of tools available",
+	// }, ListAllTools)
+
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "listTools",
-		Description: "Use this tool to view the full list of tools available",
-	}, ListAllTools)
+		Name:        "searchTools",
+		Description: "Use this tool to search relevant tools from a search query",
+	}, SearchTools)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "callTool",
+		Description: "Call a tool from an MCP server. Use the identifier from searchTools results (e.g., github__createIssue)",
+	}, CallTool)
+
+	server.AddPrompt(&mcp.Prompt{
+		Name:        "telescope_usage",
+		Description: "Explains how to use the telescope MCP proxy tools correctly. Read this before using any tools.",
+	}, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		return &mcp.GetPromptResult{
+			Description: "Usage guide for telescope MCP proxy",
+			Messages: []*mcp.PromptMessage{
+				{
+					Role: "assistant",
+					Content: &mcp.TextContent{
+						Text: `You have access to two tools via the telescope MCP proxy:
+
+1. searchTools(query) — searches the tool registry to find callable tools.
+   - Use this BEFORE giving up on any task
+   - Query must be a short action phrase, NOT the user's question
+   - Good: "web search", "send email", "create github issue"
+   - Bad: "what is the most used MCP server 2025"
+
+2. call_tool(tool_id, args) — calls a tool returned by searchTools.
+   - Use the exact Tool ID from searchTools results
+   - Pass args matching the tool's input schema
+
+WORKFLOW:
+User asks something → you have no tool for it → searchTools("action phrase") → call_tool with result → respond to user.
+Never tell the user you cannot do something without calling searchTools first.`,
+					},
+				},
+			},
+		}, nil
+	})
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatalf("Server failed: %v", err)

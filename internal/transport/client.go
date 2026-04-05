@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -61,6 +62,7 @@ func FetchToolsOfStar(ctx context.Context, star config.StarConfig) ([]*types.Too
 		for i, mcpTool := range res.Tools {
 			ident := fmt.Sprintf("%s::%s", star.Name, mcpTool.Name)
 			tools[i] = &types.Tool{
+				ServerName:   star.Name,
 				Name:         mcpTool.Name,
 				Description:  mcpTool.Description,
 				Identifier:   ident,
@@ -73,4 +75,50 @@ func FetchToolsOfStar(ctx context.Context, star config.StarConfig) ([]*types.Too
 	}
 
 	return nil, fmt.Errorf("MCP %s: %s does not support tools", star.ID, star.Name)
+}
+
+func CallToolOnStar(ctx context.Context, star config.StarConfig, toolName string, input json.RawMessage) (*mcp.CallToolResult, error) {
+	httpClient := &http.Client{
+		Transport: &httpTripper{
+			headers:     star.Transport.HTTP.Headers,
+			mainTripper: http.DefaultTransport,
+		},
+	}
+
+	client := mcp.NewClient(&mcp.Implementation{
+		Name:    "telescope-client",
+		Version: "v0.0.1",
+	}, nil)
+
+	transport := &mcp.StreamableClientTransport{
+		Endpoint:   star.Transport.HTTP.BaseURL,
+		HTTPClient: httpClient,
+	}
+
+	session, err := client.Connect(ctx, transport, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to MCP %s: %w", star.ID, err)
+	}
+	defer session.Close()
+
+	params := &mcp.CallToolParams{
+		Name:      toolName,
+		Arguments: input,
+	}
+
+	result, err := session.CallTool(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call tool %s on %s: %w", toolName, star.ID, err)
+	}
+
+	return result, nil
+}
+
+func GetStarByName(stars []config.StarConfig, serverName string) *config.StarConfig {
+	for _, star := range stars {
+		if star.Name == serverName {
+			return &star
+		}
+	}
+	return nil
 }

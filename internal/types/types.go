@@ -1,6 +1,7 @@
 package types
 
 type Tool struct {
+	ServerName   string
 	Name         string
 	Identifier   string
 	Uuid         string

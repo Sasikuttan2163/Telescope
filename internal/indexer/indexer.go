@@ -90,10 +90,31 @@ func GetAllIndexedStars(ctx context.Context, mainConfig config.MainConfig) ([]ty
 		return nil, err
 	}
 
+	return payloadsToTools(points)
+}
+
+func GetTopKTools(ctx context.Context, mainConfig config.MainConfig, queryVector []float32) ([]types.Tool, error) {
+	qdrantClient, err := qdrantdb.NewQdrant(mainConfig.Qdrant.Host, mainConfig.Qdrant.Port)
+	if err != nil {
+		return nil, err
+	}
+
+	points, err := qdrantClient.Query(ctx, mainConfig.Qdrant.CollectionName, queryVector)
+	if err != nil {
+		return nil, err
+	}
+
+	return payloadsToTools(points)
+}
+
+func payloadsToTools[T any](points []T) ([]types.Tool, error) {
 	tools := make([]types.Tool, 0, len(points))
 
-	for _, v := range points {
-		payloadMap := qdrantPayloadToMap(v.Payload)
+	for _, point := range points {
+		payloadMap := getPayload(point)
+		if payloadMap == nil {
+			continue
+		}
 
 		payloadBytes, err := json.Marshal(payloadMap)
 		if err != nil {
@@ -109,6 +130,18 @@ func GetAllIndexedStars(ctx context.Context, mainConfig config.MainConfig) ([]ty
 	}
 
 	return tools, nil
+}
+
+func getPayload[T any](point T) map[string]any {
+	v := any(point)
+	switch p := v.(type) {
+	case *qdrant.RetrievedPoint:
+		return qdrantPayloadToMap(p.Payload)
+	case *qdrant.ScoredPoint:
+		return qdrantPayloadToMap(p.Payload)
+	default:
+		return nil
+	}
 }
 
 func qdrantPayloadToMap(payload map[string]*qdrant.Value) map[string]any {

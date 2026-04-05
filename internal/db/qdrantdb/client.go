@@ -2,6 +2,7 @@ package qdrantdb
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/Sasikuttan2163/Telescope/internal/types"
 	"github.com/qdrant/go-client/qdrant"
@@ -54,18 +55,35 @@ func (q *Qdrant) Insert(ctx context.Context, collectionName string, id string, v
 	return err
 }
 
+func structToMap(s any, excludeFields ...string) map[string]any {
+	exclude := make(map[string]bool)
+	for _, f := range excludeFields {
+		exclude[f] = true
+	}
+
+	v := reflect.ValueOf(s).Elem()
+	result := make(map[string]any)
+
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Type().Field(i)
+		if exclude[field.Name] {
+			continue
+		}
+		result[field.Name] = v.Field(i).Interface()
+	}
+
+	return result
+}
+
 func (q *Qdrant) BatchInsert(ctx context.Context, collectionName string, tools []*types.Tool) error {
 	points := make([]*qdrant.PointStruct, len(tools))
 
 	for i, v := range tools {
-		mp := make(map[string]any)
-		mp["Name"] = v.Name
-		mp["Description"] = v.Description
-		mp["Identifier"] = v.Identifier
+		payload := structToMap(v, "Vector")
 		points[i] = &qdrant.PointStruct{
 			Id:      qdrant.NewID(v.Uuid),
 			Vectors: qdrant.NewVectors(v.Vector...),
-			Payload: qdrant.NewValueMap(mp),
+			Payload: qdrant.NewValueMap(payload),
 		}
 	}
 
@@ -85,6 +103,7 @@ func (q *Qdrant) Query(ctx context.Context, collectionName string, query []float
 		&qdrant.QueryPoints{
 			CollectionName: collectionName,
 			Query:          qdrant.NewQuery(query...),
+			WithPayload:    qdrant.NewWithPayload(true),
 		},
 	)
 }
