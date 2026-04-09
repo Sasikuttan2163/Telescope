@@ -22,12 +22,12 @@ type ListAllToolsParams struct {
 }
 
 type SearchToolsParams struct {
-	Query string `json:"query" jsonschema:"Action-oriented phrase describing what you want to DO e.g. 'web search' or 'send email' or 'create github issue'. Before giving up or telling the user you cannot do something ALWAYS call searchTools first to find the right tool. Do NOT pass the user question directly as the query. Bad: 'what is the most used MCP server' Good: 'web search'. Not for searching the web or files directly — use it to FIND the tool that can do that."`
+	Query string `json:"query" jsonschema:"Keywords for the CAPABILITY required. Do NOT include search terms for the user's specific topic. Correct: 'web search', 'github API', 'file system'. Incorrect: 'search for hotels in Chennai'. Only use this to discover which tools exist."`
 }
 
 type CallToolParams struct {
-	ToolName string         `json:"toolName" jsonschema:"The tool which is being called"`
-	Input    map[string]any `json:"inputJson" jsonschema:"Input to be given to the tool based on inputSchema as a JSON"`
+	ToolName string         `json:"toolName" jsonschema:"The FULL CALL_ID returned by the SearchTools function (e.g., 'serverName__toolName'). NEVER guess this name; only use names found via SearchTools."`
+	Input    map[string]any `json:"inputJson" jsonschema:"The arguments for the tool, following the tool's specific Input Schema."`
 }
 
 func ListAllTools(ctx context.Context, req *mcp.CallToolRequest, args ListAllToolsParams) (*mcp.CallToolResult, any, error) {
@@ -87,10 +87,12 @@ func SearchTools(ctx context.Context, req *mcp.CallToolRequest, args SearchTools
 	}
 
 	for i, v := range topKTools {
+		fullCallID := fmt.Sprintf("%s__%s", v.ServerName, v.Name)
+
 		schemaBytes, _ := json.Marshal(v.InputSchema)
 		res = fmt.Append(res, fmt.Sprintf(
-			"Rank %d:\n  Tool ID: %s\n  Server: %s\n  Tool Name: %s\n  Description: %s\n  Input Schema: %s\n\n",
-			i, v.Uuid, v.ServerName, v.Name, v.Description, string(schemaBytes),
+			"Rank %d:\n  CALL_ID: %s\n  Description: %s\n  Input Schema: %s\n\n",
+			i, fullCallID, v.Description, string(schemaBytes),
 		))
 	}
 

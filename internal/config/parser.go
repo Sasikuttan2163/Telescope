@@ -55,7 +55,7 @@ type HTTPTransportConfig struct {
 
 type StdioTransportConfig struct {
 	Command    []string `json:"command" validate:"required,min=1"` // ["npx", "@mcp/server-filesystem"]
-	Args       []string `json:"args,omitempty"`
+	Args       []string `json:"arguments,omitempty"`
 	Env        []string `json:"env,omitempty"` // Environment variables for process
 	WorkingDir string   `json:"working_dir,omitempty"`
 }

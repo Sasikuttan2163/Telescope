@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os/exec"
 
 	"github.com/Sasikuttan2163/Telescope/internal/config"
 	"github.com/Sasikuttan2163/Telescope/internal/types"
@@ -25,29 +26,51 @@ func (ht *httpTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return ht.mainTripper.RoundTrip(req)
 }
 
-func FetchToolsOfStar(ctx context.Context, star config.StarConfig) ([]*types.Tool, error) {
-	httpClient := &http.Client{
-		Transport: &httpTripper{
-			headers:     star.Transport.HTTP.Headers,
-			mainTripper: http.DefaultTransport,
-		},
+func getTransport(ctx context.Context, star config.StarConfig) (mcp.Transport, error) {
+	if star.Transport.Type == "http" {
+		httpClient := &http.Client{
+			Transport: &httpTripper{
+				headers:     star.Transport.HTTP.Headers,
+				mainTripper: http.DefaultTransport,
+			},
+		}
+		return &mcp.StreamableClientTransport{
+			Endpoint:   star.Transport.HTTP.BaseURL,
+			HTTPClient: httpClient,
+		}, nil
+	} else if star.Transport.Type == "stdio" && star.Transport.Stdio != nil {
+		cmd := exec.Command(star.Transport.Stdio.Command[0], star.Transport.Stdio.Args...)
+		log.Printf("[DEBUG] Stdio command: %s %v", star.Transport.Stdio.Command[0], star.Transport.Stdio.Args)
+		return &mcp.CommandTransport{
+			Command: cmd,
+		}, nil
 	}
+
+	return nil, fmt.Errorf("Unknown transport type in use.")
+
+}
+
+func FetchToolsOfStar(ctx context.Context, star config.StarConfig) ([]*types.Tool, error) {
+	log.Printf("[DEBUG] FetchToolsOfStar called for %s (type: %s)", star.ID, star.Transport.Type)
 
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "telescope-client",
 		Version: "v0.0.1",
 	}, nil)
 
-	transport := &mcp.StreamableClientTransport{
-		Endpoint:   star.Transport.HTTP.BaseURL,
-		HTTPClient: httpClient,
+	transport, err := getTransport(ctx, star)
+	if err != nil {
+		log.Printf("Failed to connect to %s: %v", star.ID, err)
+		return nil, fmt.Errorf("Failed to create transport for MCP %s: %s", star.ID, star.Name)
 	}
 
+	log.Printf("[DEBUG] Transport created for %s, attempting connect...", star.ID)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		log.Printf("Failed to connect to %s: %v", star.ID, err)
 		return nil, fmt.Errorf("Failed to connect to MCP %s: %s", star.ID, star.Name)
 	}
+	log.Printf("[DEBUG] Connected to %s successfully", star.ID)
 	defer session.Close()
 
 	if session.InitializeResult().Capabilities.Tools != nil {
@@ -78,21 +101,16 @@ func FetchToolsOfStar(ctx context.Context, star config.StarConfig) ([]*types.Too
 }
 
 func CallToolOnStar(ctx context.Context, star config.StarConfig, toolName string, input json.RawMessage) (*mcp.CallToolResult, error) {
-	httpClient := &http.Client{
-		Transport: &httpTripper{
-			headers:     star.Transport.HTTP.Headers,
-			mainTripper: http.DefaultTransport,
-		},
-	}
 
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "telescope-client",
 		Version: "v0.0.1",
 	}, nil)
 
-	transport := &mcp.StreamableClientTransport{
-		Endpoint:   star.Transport.HTTP.BaseURL,
-		HTTPClient: httpClient,
+	transport, err := getTransport(ctx, star)
+	if err != nil {
+		log.Printf("Failed to connect to %s: %v", star.ID, err)
+		return nil, fmt.Errorf("Failed to create transport for MCP %s: %s", star.ID, star.Name)
 	}
 
 	session, err := client.Connect(ctx, transport, nil)
